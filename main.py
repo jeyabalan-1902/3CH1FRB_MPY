@@ -19,9 +19,9 @@ from machine import Pin, Timer
 from nvs import get_product_id, get_stored_wifi_credentials, clear_wifi_credentials
 from wifi_con import connect_wifi, check_internet, wifi, ap
 from http import start_http_server
-from mqtt import mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset
-from gpio import F1, F2, F3, Rst, http_server_led, press_start_time, reset_timer, S_Led, last_trigger_times, DEBOUNCE_DELAY, debounce_timer, R1, R2, R3
-from eeprom import load_state
+from mqtt import mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset, restore_last_fan_speed, process_F4, fan_state, last_fan_speed, fan_speed0
+from gpio import F1, F2, F3, F4, Rst, http_server_led, press_start_time, reset_timer, S_Led, last_trigger_times, DEBOUNCE_DELAY, debounce_timer, R1, R2, R3, R4, R5, R6, R7
+from eeprom import load_fan_state, load_relay_state
 
 MAX_FAST_RETRIES = 50
 FAST_RETRY_INTERVAL = 10
@@ -66,6 +66,13 @@ def handle_F3(pin):
     if utime.ticks_diff(now, last_trigger_times["F3"]) > DEBOUNCE_DELAY:
         last_trigger_times["F3"] = now
         debounce_timer.init(mode=Timer.ONE_SHOT, period=DEBOUNCE_DELAY, callback=lambda t: process_F3())
+        
+def handle_F4(pin):
+    global last_trigger_times
+    now = utime.ticks_ms()
+    if utime.ticks_diff(now, last_trigger_times["F4"]) > DEBOUNCE_DELAY:
+        last_trigger_times["F4"] = now
+        debounce_timer.init(mode=Timer.ONE_SHOT, period=DEBOUNCE_DELAY, callback=lambda t: process_F4())
         
 def print_firmware_version():
     try:
@@ -131,14 +138,21 @@ async def wifi_reconnect():
 F1.irq(trigger=Pin.IRQ_RISING, handler=handle_F1)
 F2.irq(trigger=Pin.IRQ_RISING, handler=handle_F2)
 F3.irq(trigger=Pin.IRQ_RISING, handler=handle_F3)
+F4.irq(trigger=Pin.IRQ_RISING, handler=handle_F4)
 Rst.irq(trigger=Pin.IRQ_FALLING, handler=Rst_irq_handler)
 
         
 async def main():
-    r1, r2, r3 = load_state()
+    global fan_state, last_fan_speed
+    r1,r2,r3 = load_relay_state()
+    fan_state, fan_speed = load_fan_state()
     R1.value(r1)
     R2.value(r2)
     R3.value(r3)
+    if fan_state == 1:
+        restore_last_fan_speed()
+    else:
+        fan_speed0()
     stored_ssid, stored_password = get_stored_wifi_credentials()
     if stored_ssid and stored_password:
         ap.active(False)

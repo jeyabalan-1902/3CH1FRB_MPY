@@ -12,12 +12,15 @@ from collections import OrderedDict
 from machine import Timer, Pin
 import uasyncio as asyncio
 from nvs import get_product_id, product_key, clear_wifi_credentials
-from gpio import R1,R2,R3, S_Led
-from eeprom import save_state
+from gpio import R1, R2, R3, R4, R5, R6, R7, S_Led
+from eeprom import save_fan_state, save_relay_state
 
 
 client = None
 product_id = get_product_id()
+
+last_fan_speed = 0
+fan_state = 0
 
 BROKER_ADDRESS = "mqtt.onwords.in"
 MQTT_CLIENT_ID = product_id
@@ -55,13 +58,17 @@ def hardReset():
 #publish devices state
 def publish_state():
     global client
+    global last_fan_speed, fan_state
     if client:
-        state = {
-            "device1": R1.value(),
-            "device2": R2.value(),
-            "device3": R3.value()
-        }
-        save_state(R1.value(), R2.value(), R3.value())
+        state = OrderedDict([
+            ("device1", R1.value()),
+            ("device2", R2.value()),
+            ("device3", R3.value()),
+            ("device4", fan_state),
+            ("speed", last_fan_speed)
+        ])
+        
+        save_relay_state(R1.value(), R2.value(), R3.value())
         client.publish(TOPIC_CURRENT_STATUS, ujson.dumps(state))
         print("Published state:", state)
     else:
@@ -71,21 +78,30 @@ def publish_state():
 #publish Device log
 def publish_deviceLog(device, state):
     global client
+    global last_fan_speed, fan_state
     if client:
         log = {
-            device: state,
             "id": product_id,
             "client_id": "Switch",
             "ip": network.WLAN(network.STA_IF).ifconfig()[0],
             "time_stamp": get_timestamp()
         }
+        
+        if device == "device4":
+            log[device] = 1 if state else 0   
+            log["speed"] = last_fan_speed      
+        else:
+            log[device] = state
+
         client.publish(TOPIC_DEVICE_LOG, ujson.dumps(log))
-        print("log published:", log)       
+        print("log published:", log)
     else:
         print("mqtt client not connected")
 
+
 #MQTT callback
 def mqtt_callback(topic, msg):
+    global last_fan_speed, fan_state
     topic_str = topic.decode()
     print(f"Received from {topic_str}: {msg.decode()}")
 
@@ -108,7 +124,34 @@ def mqtt_callback(topic, msg):
                 status_msg = ujson.dumps({"device3": data["device3"]})
                 client.publish(TOPIC_CURRENT_STATUS, status_msg)
                 
-            save_state(R1.value(), R2.value(), R3.value())
+            if "device4" in data and data["device4"] in [0, 1]:
+                if "speed" in data and 0 <= data["speed"] <= 5:
+                    speed = data["speed"]
+                    if speed == 1:
+                        fan_speed1()
+                    elif speed == 2:
+                        fan_speed2()
+                    elif speed == 3:
+                        fan_speed3()
+                    elif speed == 4:
+                        fan_speed4()
+                    elif speed == 5:
+                        fan_speed5()
+                    
+                    if data["device4"] == 1:
+                        fan_state = 1
+                        print("Fan ON with speed", speed)
+                    else:
+                        fan_speed0()
+                        fan_state = 0
+                        print("Fan OFF but retain speed", speed)      
+                    
+                        last_fan_speed = speed
+                save_fan_state(fan_state, last_fan_speed)
+                status_msg = ujson.dumps({"device4": data["device4"], "speed": last_fan_speed})
+                client.publish(TOPIC_CURRENT_STATUS, status_msg)
+            save_relay_state(R1.value(), R2.value(), R3.value())
+                
 
         except ValueError as e:
             print("Error parsing JSON:", e)
@@ -244,6 +287,7 @@ async def mqtt_keepalive():
 def process_F1():
     new_state = not R1.value()
     R1.value(new_state)
+    save_light_state(0x00, R1.value())
     print("switch 1 toggled")
     publish_state()
     publish_deviceLog("device1", new_state)
@@ -251,6 +295,7 @@ def process_F1():
 def process_F2():
     new_state = not R2.value()
     R2.value(new_state)
+    save_light_state(0x01, R2.value())
     print("Switch 2 toggled")
     publish_state()
     publish_deviceLog("device2", new_state)
@@ -259,6 +304,82 @@ def process_F2():
 def process_F3():
     new_state = not R3.value()
     R3.value(new_state)
+    save_light_state(0x02, R3.value())
     print("Switch 3 toggled")
     publish_state()
     publish_deviceLog("device3", new_state)
+    
+def process_F4():
+    global fan_state, last_fan_speed
+    fan_state = 1 if fan_state == 0 else 0
+    print("switch 4 toggled")
+    if fan_state == 1:
+        restore_last_fan_speed()
+    else:
+        fan_speed0()
+    save_fan_state(fan_state, last_fan_speed)
+    publish_state()
+    publish_deviceLog("device4", fan_state)
+       
+
+def restore_last_fan_speed():
+    global last_fan_speed
+    if last_fan_speed == 1:
+        fan_speed1()
+    elif last_fan_speed == 2:
+        fan_speed2()
+    elif last_fan_speed == 3:
+        fan_speed3()
+    elif last_fan_speed == 4:
+        fan_speed4()
+    elif last_fan_speed == 5:
+        fan_speed5()
+        
+        
+def fan_speed0():
+    R4.value(0)
+    R5.value(0)
+    R6.value(0)
+    R7.value(0)
+
+def fan_speed1():
+    global last_fan_speed
+    last_fan_speed = 1
+    R4.value(0)
+    R5.value(1)
+    R6.value(0)
+    R7.value(0)
+
+def fan_speed2():
+    global last_fan_speed
+    last_fan_speed = 2
+    R4.value(1)
+    R5.value(1)
+    R6.value(0)
+    R7.value(0)
+
+def fan_speed3():
+    global last_fan_speed
+    last_fan_speed = 3
+    R4.value(1)
+    R5.value(0)
+    R6.value(1)
+    R7.value(0)
+
+def fan_speed4():
+    global last_fan_speed
+    last_fan_speed = 4
+    R4.value(0)
+    R5.value(1)
+    R6.value(1)
+    R7.value(0)
+
+def fan_speed5():
+    global last_fan_speed
+    last_fan_speed = 5
+    R4.value(0)
+    R5.value(0)
+    R6.value(0)
+    R7.value(1) 
+
+    
