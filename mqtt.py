@@ -12,8 +12,17 @@ from collections import OrderedDict
 from machine import Timer, Pin
 import uasyncio as asyncio
 from nvs import get_product_id, product_key, clear_wifi_credentials
-from gpio import R1, R2, R3, R4, R5, R6, R7, S_Led
-from eeprom import save_fan_state, save_relay_state
+from gpio import S_Led
+from at24c32n import eeprom, save_device_states
+
+# from eeprom import EEPROM
+# from machine import I2C, Pin
+# 
+# I2C_ADDR = 0x50     
+# EEPROM_SIZE = 32    
+# 
+# i2c = I2C(0, scl=Pin(13), sda=Pin(12), freq=800000)
+# eeprom = EEPROM(addr=I2C_ADDR, at24x=EEPROM_SIZE, i2c=i2c)
 
 
 client = None
@@ -35,6 +44,16 @@ PORT = 1883
 USERNAME = "Nikhil"
 MQTT_PASSWORD = "Nikhil8182"
 MQTT_KEEPALIVE = 60
+
+
+# Pin Setup
+R1 = Pin(25, Pin.OUT)   #light 1
+R2 = Pin(33, Pin.OUT)   #light 2
+R3 = Pin(32, Pin.OUT)   #light 3
+R4 = Pin(13, Pin.OUT)   #fan speed 1
+R5 = Pin(14, Pin.OUT)   #fan speed 2
+R6 = Pin(27, Pin.OUT)   #fan_speed 3
+R7 = Pin(26, Pin.OUT)   #fan_speed 4
 
 def get_timestamp():
     try:
@@ -58,7 +77,7 @@ def hardReset():
 #publish devices state
 def publish_state():
     global client
-    global last_fan_speed, fan_state
+    global last_fan_speed, fan_state, R1, R2, R3
     if client:
         state = OrderedDict([
             ("device1", R1.value()),
@@ -67,8 +86,6 @@ def publish_state():
             ("device4", fan_state),
             ("speed", last_fan_speed)
         ])
-        
-        save_relay_state(R1.value(), R2.value(), R3.value())
         client.publish(TOPIC_CURRENT_STATUS, ujson.dumps(state))
         print("Published state:", state)
     else:
@@ -101,7 +118,7 @@ def publish_deviceLog(device, state):
 
 #MQTT callback
 def mqtt_callback(topic, msg):
-    global last_fan_speed, fan_state
+    global last_fan_speed, fan_state, R1, R2, R3
     topic_str = topic.decode()
     print(f"Received from {topic_str}: {msg.decode()}")
 
@@ -147,12 +164,11 @@ def mqtt_callback(topic, msg):
                         print("Fan OFF but retain speed", speed)      
                     
                         last_fan_speed = speed
-                save_fan_state(fan_state, last_fan_speed)
                 status_msg = ujson.dumps({"device4": data["device4"], "speed": last_fan_speed})
                 client.publish(TOPIC_CURRENT_STATUS, status_msg)
-            save_relay_state(R1.value(), R2.value(), R3.value())
                 
-
+            save_device_states(R1.value(), R2.value(), R3.value(), fan_state, last_fan_speed)
+                
         except ValueError as e:
             print("Error parsing JSON:", e)
 
@@ -285,27 +301,30 @@ async def mqtt_keepalive():
         
         
 def process_F1():
+    global R1
     new_state = not R1.value()
     R1.value(new_state)
-    save_light_state(0x00, R1.value())
     print("switch 1 toggled")
+    eeprom.write(0, bytes([R1.value()]))
     publish_state()
     publish_deviceLog("device1", new_state)
     
 def process_F2():
+    global R2
     new_state = not R2.value()
     R2.value(new_state)
-    save_light_state(0x01, R2.value())
     print("Switch 2 toggled")
+    eeprom.write(1, bytes([R2.value()]))
     publish_state()
     publish_deviceLog("device2", new_state)
     
 
 def process_F3():
+    global R3
     new_state = not R3.value()
     R3.value(new_state)
-    save_light_state(0x02, R3.value())
     print("Switch 3 toggled")
+    eeprom.write(2, bytes([R3.value()]))
     publish_state()
     publish_deviceLog("device3", new_state)
     
@@ -317,7 +336,8 @@ def process_F4():
         restore_last_fan_speed()
     else:
         fan_speed0()
-    save_fan_state(fan_state, last_fan_speed)
+    eeprom.write(3, bytes([fan_state]))
+    eeprom.write(4, bytes([last_fan_speed]))
     publish_state()
     publish_deviceLog("device4", fan_state)
        

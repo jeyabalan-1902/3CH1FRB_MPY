@@ -19,9 +19,10 @@ from machine import Pin, Timer
 from nvs import get_product_id, get_stored_wifi_credentials, clear_wifi_credentials
 from wifi_con import connect_wifi, check_internet, wifi, ap
 from http import start_http_server
-from mqtt import mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset, restore_last_fan_speed, process_F4, fan_state, last_fan_speed, fan_speed0
-from gpio import F1, F2, F3, F4, Rst, http_server_led, press_start_time, reset_timer, S_Led, last_trigger_times, DEBOUNCE_DELAY, debounce_timer, R1, R2, R3, R4, R5, R6, R7
-from eeprom import load_fan_state, load_relay_state
+from mqtt import mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset, restore_last_fan_speed, process_F4
+from gpio import F1, F2, F3, F4, Rst, http_server_led, press_start_time, reset_timer, S_Led, last_trigger_times, DEBOUNCE_DELAY, debounce_timer
+from at24c32n import load_device_states
+import mqtt
 
 MAX_FAST_RETRIES = 50
 FAST_RETRY_INTERVAL = 10
@@ -89,7 +90,7 @@ async def wifi_reconnect():
         if not wifi.isconnected():
             print("Wi-Fi disconnected! Attempting reconnection...")
             S_Led.value(1)
-            time.sleep(0.5)
+            time.sleep(0.5) 
             S_Led.value(0)
             time.sleep(0.5)
             stored_ssid, stored_password = get_stored_wifi_credentials()
@@ -135,6 +136,30 @@ async def wifi_reconnect():
                 await asyncio.sleep(10)
                 
 
+def apply_loaded_device_states():
+    r1, r2, r3, fan_state, fan_speed = load_device_states()
+    mqtt.R1.value(r1)
+    mqtt.R2.value(r2)
+    mqtt.R3.value(r3)
+
+    mqtt.fan_state = fan_state
+    mqtt.last_fan_speed = fan_speed
+
+    if mqtt.fan_state == 1:
+        if mqtt.last_fan_speed == 1:
+            mqtt.fan_speed1()
+        elif mqtt.last_fan_speed == 2:
+            mqtt.fan_speed2()
+        elif mqtt.last_fan_speed == 3:
+            mqtt.fan_speed3()
+        elif mqtt.last_fan_speed == 4:
+            mqtt.fan_speed4()
+        elif mqtt.last_fan_speed == 5:
+            mqtt.fan_speed5()
+    else:
+        mqtt.fan_speed0()
+                
+
 F1.irq(trigger=Pin.IRQ_RISING, handler=handle_F1)
 F2.irq(trigger=Pin.IRQ_RISING, handler=handle_F2)
 F3.irq(trigger=Pin.IRQ_RISING, handler=handle_F3)
@@ -143,16 +168,7 @@ Rst.irq(trigger=Pin.IRQ_FALLING, handler=Rst_irq_handler)
 
         
 async def main():
-    global fan_state, last_fan_speed
-    r1,r2,r3 = load_relay_state()
-    fan_state, fan_speed = load_fan_state()
-    R1.value(r1)
-    R2.value(r2)
-    R3.value(r3)
-    if fan_state == 1:
-        restore_last_fan_speed()
-    else:
-        fan_speed0()
+    apply_loaded_device_states()
     stored_ssid, stored_password = get_stored_wifi_credentials()
     if stored_ssid and stored_password:
         ap.active(False)

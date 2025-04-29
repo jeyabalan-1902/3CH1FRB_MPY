@@ -4,15 +4,6 @@ from machine import Pin, Timer
 import utime
 from mqtt import*
 
-# Pin Setup
-R1 = Pin(25, Pin.OUT)   #light 1
-R2 = Pin(33, Pin.OUT)   #light 2
-R3 = Pin(32, Pin.OUT)   #light 3
-R4 = Pin(13, Pin.OUT)   #fan speed 1
-R5 = Pin(14, Pin.OUT)   #fan speed 2
-R6 = Pin(27, Pin.OUT)   #fan_speed 3
-R7 = Pin(26, Pin.OUT)   #fan_speed 4
-
 S_Led = Pin(17, Pin.OUT)
 
 F1 = Pin(5, Pin.IN, Pin.PULL_DOWN)
