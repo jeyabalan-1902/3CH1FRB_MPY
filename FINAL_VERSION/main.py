@@ -20,7 +20,7 @@ from nvs import get_product_id, get_stored_wifi_credentials, clear_wifi_credenti
 from wifi_con import connect_wifi, check_internet, wifi, ap
 from http import start_http_server
 from mqtt import mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset, restore_last_fan_speed, process_F4
-from gpio import Rst, http_server_led, press_start_time, reset_timer, S_Led, last_trigger_times, DEBOUNCE_DELAY, debounce_timer
+from gpio import Rst, http_server_led, press_start_time, reset_timer, S_Led
 from at24c32n import load_device_states
 import mqtt
 
@@ -32,13 +32,6 @@ F1 = Pin(5, Pin.IN, Pin.PULL_DOWN)
 F2 = Pin(18, Pin.IN, Pin.PULL_DOWN)
 F3 = Pin(19, Pin.IN, Pin.PULL_DOWN)
 F4 = Pin(23, Pin.IN, Pin.PULL_DOWN)
-
-last_states = {
-    "F1": 0,
-    "F2": 0,
-    "F3": 0,
-    "F4": 0
-}
 
 product_id = get_product_id()
 print(f"stored Product ID:{product_id}")
@@ -89,17 +82,24 @@ async def wifi_reconnect():
         if not wifi.isconnected():
             print("Wi-Fi disconnected! Attempting reconnection...")
             S_Led.value(1)
-            time.sleep(0.5) 
+            await asyncio.sleep(0.5)
             S_Led.value(0)
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
+            S_Led.value(1)
+            await asyncio.sleep(0.5)
+            S_Led.value(0)
+            await asyncio.sleep(0.5)
             stored_ssid, stored_password = get_stored_wifi_credentials()
 
             if stored_ssid and stored_password:
                 while retry_count < MAX_FAST_RETRIES:
-                    S_Led.value(1)
-                    time.sleep(0.5)
+                    await asyncio.sleep(0.5)
                     S_Led.value(0)
-                    time.sleep(0.5)
+                    await asyncio.sleep(0.5)
+                    S_Led.value(1)
+                    await asyncio.sleep(0.5)
+                    S_Led.value(0)
+                    await asyncio.sleep(0.5)
                     print(f"Reconnection attempt {retry_count + 1} of {MAX_FAST_RETRIES}...")
                     if connect_wifi(stored_ssid, stored_password):
                         print("Wi-Fi Reconnected!")
