@@ -93,6 +93,7 @@ async def wifi_reconnect():
 
             if stored_ssid and stored_password:
                 while retry_count < MAX_FAST_RETRIES:
+                    S_Led.value(1)
                     await asyncio.sleep(0.5)
                     S_Led.value(0)
                     await asyncio.sleep(0.5)
@@ -112,9 +113,13 @@ async def wifi_reconnect():
                     print("Switching to slow reconnection attempts every 5 minutes.")
                     while not wifi.isconnected():
                         S_Led.value(1)
-                        time.sleep(0.5)
+                        await asyncio.sleep(0.5)
                         S_Led.value(0)
-                        time.sleep(0.5)
+                        await asyncio.sleep(0.5)
+                        S_Led.value(1)
+                        await asyncio.sleep(0.5)
+                        S_Led.value(0)
+                        await asyncio.sleep(0.5)
                         if connect_wifi(stored_ssid, stored_password):
                             print("Wi-Fi Reconnected!")
                             retry_count = 0 
