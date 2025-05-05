@@ -19,14 +19,19 @@ from machine import Pin, Timer
 from nvs import get_product_id, get_stored_wifi_credentials, clear_wifi_credentials
 from wifi_con import connect_wifi, check_internet, wifi, ap
 from http import start_http_server
-from mqtt import mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset, restore_last_fan_speed, process_F4
-from gpio import F1, F2, F3, F4, Rst, http_server_led, press_start_time, reset_timer, S_Led, last_trigger_times, DEBOUNCE_DELAY, debounce_timer
+from mqtt import reconnect_mqtt, mqtt_listener, mqtt_keepalive, connect_mqtt, process_F3, process_F2, process_F1, hardReset, restore_last_fan_speed, process_F4
+from gpio import Rst, http_server_led, press_start_time, reset_timer, S_Led, blink_reconnect
 from at24c32n import load_device_states
 import mqtt
 
 MAX_FAST_RETRIES = 50
 FAST_RETRY_INTERVAL = 10
 SLOW_RETRY_INTERVAL = 300
+
+F1 = Pin(5, Pin.IN, Pin.PULL_DOWN)
+F2 = Pin(18, Pin.IN, Pin.PULL_DOWN)
+F3 = Pin(19, Pin.IN, Pin.PULL_DOWN)
+F4 = Pin(23, Pin.IN, Pin.PULL_DOWN)
 
 product_id = get_product_id()
 print(f"stored Product ID:{product_id}")
@@ -46,34 +51,21 @@ def Rst_irq_handler(pin):
         press_start_time = time.ticks_ms()
         reset_timer.init(mode=Timer.ONE_SHOT, period=5000, callback=reset_callback)
         
-def handle_F1(pin):
-    global last_trigger_times
-    now = utime.ticks_ms()
-    if utime.ticks_diff(now, last_trigger_times["F1"]) > DEBOUNCE_DELAY:
-        last_trigger_times["F1"] = now
-        debounce_timer.init(mode=Timer.ONE_SHOT, period=DEBOUNCE_DELAY, callback=lambda t: process_F1())
-    
-def handle_F2(pin):
-    global last_trigger_times
-    now = utime.ticks_ms()
-    if utime.ticks_diff(now, last_trigger_times["F2"]) > DEBOUNCE_DELAY:
-        last_trigger_times["F2"] = now
-        debounce_timer.init(mode=Timer.ONE_SHOT, period=DEBOUNCE_DELAY, callback=lambda t: process_F2())
-
-
-def handle_F3(pin):
-    global last_trigger_times
-    now = utime.ticks_ms()
-    if utime.ticks_diff(now, last_trigger_times["F3"]) > DEBOUNCE_DELAY:
-        last_trigger_times["F3"] = now
-        debounce_timer.init(mode=Timer.ONE_SHOT, period=DEBOUNCE_DELAY, callback=lambda t: process_F3())
-        
-def handle_F4(pin):
-    global last_trigger_times
-    now = utime.ticks_ms()
-    if utime.ticks_diff(now, last_trigger_times["F4"]) > DEBOUNCE_DELAY:
-        last_trigger_times["F4"] = now
-        debounce_timer.init(mode=Timer.ONE_SHOT, period=DEBOUNCE_DELAY, callback=lambda t: process_F4())
+async def monitor_switch(pin, callback, name):
+    switch = machine.Pin(pin, machine.Pin.IN, machine.Pin.PULL_DOWN)
+    state = switch.value() 
+    while True:
+        current = switch.value()
+        if current and not state: 
+            print(f"{name} Pressed")
+            callback()  
+            state = 1
+            await asyncio.sleep(0.3)  
+        elif not current and state:  
+            print(f"{name} Released")
+            callback()  
+            state = 0
+        await asyncio.sleep(0.05)
         
 def print_firmware_version():
     try:
@@ -88,23 +80,18 @@ async def wifi_reconnect():
     retry_count = 0
     while True:
         if not wifi.isconnected():
-            print("Wi-Fi disconnected! Attempting reconnection...")
-            S_Led.value(1)
-            time.sleep(0.5) 
-            S_Led.value(0)
-            time.sleep(0.5)
+            print("Wi-Fi disconnected! Attempting reconnection...")  
+            blink_reconnect()
             stored_ssid, stored_password = get_stored_wifi_credentials()
 
             if stored_ssid and stored_password:
                 while retry_count < MAX_FAST_RETRIES:
-                    S_Led.value(1)
-                    time.sleep(0.5)
-                    S_Led.value(0)
-                    time.sleep(0.5)
+                    blink_reconnect()
                     print(f"Reconnection attempt {retry_count + 1} of {MAX_FAST_RETRIES}...")
                     if connect_wifi(stored_ssid, stored_password):
                         print("Wi-Fi Reconnected!")
                         retry_count = 0  
+                        await reconnect_mqtt() 
                         break
                     retry_count += 1
                     await asyncio.sleep(FAST_RETRY_INTERVAL)
@@ -112,13 +99,11 @@ async def wifi_reconnect():
                 if not wifi.isconnected():
                     print("Switching to slow reconnection attempts every 5 minutes.")
                     while not wifi.isconnected():
-                        S_Led.value(1)
-                        time.sleep(0.5)
-                        S_Led.value(0)
-                        time.sleep(0.5)
+                        blink_reconnect()
                         if connect_wifi(stored_ssid, stored_password):
                             print("Wi-Fi Reconnected!")
                             retry_count = 0 
+                            await reconnect_mqtt()  
                             break
                         print("Reconnection failed, retrying in 5 minutes...")
                         await asyncio.sleep(SLOW_RETRY_INTERVAL)
@@ -134,6 +119,7 @@ async def wifi_reconnect():
             else:
                 print("Wi-Fi and internet are connected.")
                 await asyncio.sleep(10)
+
                 
 
 def apply_loaded_device_states():
@@ -160,37 +146,48 @@ def apply_loaded_device_states():
         mqtt.fan_speed0()
                 
 
-F1.irq(trigger=Pin.IRQ_RISING, handler=handle_F1)
-F2.irq(trigger=Pin.IRQ_RISING, handler=handle_F2)
-F3.irq(trigger=Pin.IRQ_RISING, handler=handle_F3)
-F4.irq(trigger=Pin.IRQ_RISING, handler=handle_F4)
 Rst.irq(trigger=Pin.IRQ_FALLING, handler=Rst_irq_handler)
 
         
 async def main():
     apply_loaded_device_states()
+    print_firmware_version()
+    switch_tasks = [
+        asyncio.create_task(monitor_switch(F1, process_F1, "F1")),
+        asyncio.create_task(monitor_switch(F2, process_F2, "F2")),
+        asyncio.create_task(monitor_switch(F3, process_F3, "F3")),
+        asyncio.create_task(monitor_switch(F4, process_F4, "F4"))
+    ]
+
     stored_ssid, stored_password = get_stored_wifi_credentials()
+
     if stored_ssid and stored_password:
         ap.active(False)
-        while True:
-            if connect_wifi(stored_ssid, stored_password):  
-                print("Wi-Fi Connected. Starting background tasks...on the updated version")
-                print_firmware_version()
-                connect_mqtt()
-                t1 = asyncio.create_task(mqtt_listener())
-                t2 = asyncio.create_task(mqtt_keepalive())
-                t3 = asyncio.create_task(wifi_reconnect())       
-                await asyncio.gather(t1, t2, t3)
-                break 
-                
+        wifi_connected = connect_wifi(stored_ssid, stored_password)
+        if wifi_connected:
+            print("Wi-Fi Connected. Starting background tasks.")
+            mqtt.mqtt_client = connect_mqtt()
+
+            tasks = switch_tasks + [asyncio.create_task(wifi_reconnect())]
+
+            if mqtt.mqtt_client:
+                tasks += [
+                    asyncio.create_task(mqtt_listener()),
+                    asyncio.create_task(mqtt_keepalive())
+                ]
             else:
-                print("Wi-Fi connected but no internet access. Reconnecting Wi-Fi...")
-                wifi.disconnect() 
-                await asyncio.sleep(5)        
+                print("MQTT connection failed. Running without MQTT.")
+
+            await asyncio.gather(*tasks)
+        else:
+            print("Wi-Fi failed. trying to reconnect.......")
+            tasks = switch_tasks + [asyncio.create_task(wifi_reconnect())]
+            await asyncio.gather(*tasks)
     else:
-        print("No WiFi credentials found, starting HTTP server...")
+        print("No Wi-Fi credentials found. Starting HTTP server...")
         http_server_led()
-        await start_http_server()
+        tasks = switch_tasks + [asyncio.create_task(start_http_server())]
+        await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
     try:

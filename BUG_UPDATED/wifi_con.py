@@ -24,36 +24,20 @@ while ap.active() is False:
     time.sleep(1)
 print("AP Mode Active. IP Address:", ap.ifconfig()[0])
 
-def connect_wifi(ssid, password):
-    while True:
+def connect_wifi(ssid, password, max_retries=5):
+    for attempt in range(max_retries):
         try:
-            print(f"Attempting to connect to Wi-Fi: {ssid}")
+            print(f"Attempt {attempt+1} to connect Wi-Fi: {ssid}")
             wifi.connect(ssid, password)
-
-            for _ in range(15): 
+            for _ in range(15):
                 if wifi.isconnected():
-                    print("Connected to WiFi:", ssid)
-                    print("IP Address:", wifi.ifconfig()[0])
+                    print("Connected to Wi-Fi")
                     return True
-                
-                else:
-                    S_Led.value(1)
-                    time.sleep(0.5)
-                    S_Led.value(0)
-                    time.sleep(0.5)
-                    S_Led.value(1)
-                    time.sleep(0.5)
-                    S_Led.value(0)
-                    time.sleep(0.5)
-                    
-                time.sleep(2) 
-
-            print("WiFi connection failed! Retrying...")
-        except OSError as e:
-            print(f"WiFi connection error: {e}. Retrying...")
+                time.sleep(1)
         except Exception as e:
-            print(f"Unexpected error: {e}. Retrying...")
+            print(f"Wi-Fi error: {e}")
         time.sleep(5)
+    return False
 
         
 def check_internet():

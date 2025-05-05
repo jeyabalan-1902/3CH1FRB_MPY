@@ -14,9 +14,13 @@ import uasyncio as asyncio
 from nvs import get_product_id, product_key, clear_wifi_credentials, store_pid
 from gpio import S_Led
 from at24c32n import eeprom, save_device_states
+from wifi_con import wifi
 
 
 client = None
+
+mqtt_reconnect_lock = asyncio.Lock()
+
 product_id = get_product_id()
 
 last_fan_speed = 0
@@ -265,40 +269,99 @@ def connect_mqtt():
         mqtt_client = 0
         return None
 
-#Reconnect MQTT
-def reconnect_mqtt():
-    global client
-    print("Reconnecting MQTT...")
-    try:
-        if client:
-            client.disconnect()
-    except:
-        pass
-    client = None
-    await asyncio.sleep(2)  
-    return connect_mqtt()
+async def reconnect_mqtt(max_retries = 10):
+    global client, mqtt_client
+    print("Reconnecting to MQTT broker...")
+    
+    async with mqtt_reconnect_lock:
+        if not wifi.isconnected():
+            print("Wi-Fi not connected, skipping MQTT reconnect.")
+            return
+        
+        for attempt in range(1 , max_retries + 1):
+            
+            try:
+                if client:
+                    try:
+                        client.disconnect()
+                    except:
+                        pass  
+                client = None 
+                await asyncio.sleep(2)  
 
-#MQTT Listen
+                print("Attempting MQTT reconnection...")
+                new_client = MQTTClient(
+                    client_id=product_id,
+                    server=BROKER_ADDRESS,
+                    port=PORT,
+                    user=USERNAME,
+                    password=MQTT_PASSWORD,
+                    keepalive=MQTT_KEEPALIVE
+                )
+                new_client.set_callback(mqtt_callback)
+                new_client.connect()
+                new_client.subscribe(TOPIC_STATUS)
+                new_client.subscribe(TOPIC_GET_CURRENT_STATUS)
+                new_client.subscribe(TOPIC_SOFTRST)
+                new_client.subscribe(TOPIC_PID)
+                new_client.subscribe(TOPIC_FIRMWARE)
+                print("Reconnected to MQTT broker")
+                if new_client:
+                    client = new_client
+                    mqtt_client = 1
+                    S_Led.value(1)
+                    return True
+
+            except Exception as e:
+                print(f"Unexpected error in reconnect_mqtt(): {e}")
+                client = None
+                mqtt_client = 0
+                S_Led.value(0)
+                await asyncio.sleep(2)
+                
+        print("All MQTT reconnection attempts failed.")
+        return False
+            
+           
 async def mqtt_listener():
+    global client, mqtt_client
     while True:
         try:
             if client:
-                client.check_msg()
+                try:
+                    client.check_msg()
+                except Exception as e:
+                    print("MQTT check_msg error:", e)
+                    mqtt_client = 0
+                    client = None
+                    await reconnect_mqtt()
+            else:
+                print("MQTT client not available, trying to reconnect...")
+                await reconnect_mqtt()
         except Exception as e:
-            print("Error checking MQTT:", e)
-            await reconnect_mqtt()
-        await asyncio.sleep(0.1)
+            print("Critical error in mqtt_listener():", e)
+        await asyncio.sleep(1)
+        
+        
 
-#keep alive
 async def mqtt_keepalive():
+    global client, mqtt_client
     while True:
         try:
             if client:
-                print("Sending MQTT PINGREQ")
-                client.ping() 
+                try:
+                    print("Sending MQTT PINGREQ")
+                    client.ping()
+                except Exception as e:
+                    print("MQTT Keep-Alive failed:", e)
+                    mqtt_client = 0
+                    client = None
+                    await reconnect_mqtt()
+            else:
+                print("MQTT client not available in keepalive, reconnecting...")
+                await reconnect_mqtt()
         except Exception as e:
-            print("MQTT Keep-Alive failed:", e)
-            await reconnect_mqtt()
+            print("Critical error in mqtt_keepalive():", e)
         await asyncio.sleep(MQTT_KEEPALIVE // 2)
         
         
