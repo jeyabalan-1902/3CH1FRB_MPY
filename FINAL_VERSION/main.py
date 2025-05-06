@@ -82,7 +82,7 @@ async def wifi_reconnect():
     while True:
         if not wifi.isconnected():
             print("Wi-Fi disconnected! Attempting reconnection...")
-            blink_reconnect()
+            await blink_reconnect()
             stored_ssid, stored_password = get_stored_wifi_credentials()
 
             if stored_ssid and stored_password:
@@ -90,7 +90,7 @@ async def wifi_reconnect():
                 await asyncio.sleep(1)  
 
                 while retry_count < MAX_FAST_RETRIES:
-                    blink_reconnect()
+                    await blink_reconnect()
                     print(f"Reconnection attempt {retry_count + 1} of {MAX_FAST_RETRIES}...")
                     if await connect_wifi(stored_ssid, stored_password):
                         print("Wi-Fi Reconnected!")
@@ -103,7 +103,7 @@ async def wifi_reconnect():
                 if not wifi.isconnected():
                     print("Switching to slow reconnection attempts every 5 minutes.")
                     while not wifi.isconnected():
-                        blink_reconnect()
+                        await blink_reconnect()
                         wifi.disconnect()
                         await asyncio.sleep(1)
                         if await connect_wifi(stored_ssid, stored_password):
@@ -116,7 +116,7 @@ async def wifi_reconnect():
 
             else:
                 print("No stored Wi-Fi credentials. Starting HTTP server...")
-                http_server_led()
+                await http_server_led()
                 await start_http_server()
         else:
             if not check_internet():
@@ -191,7 +191,7 @@ async def main():
         
     else:
         print("No Wi-Fi credentials found. Starting HTTP server...")
-        http_server_led()
+        await http_server_led()
         tasks = switch_tasks + [asyncio.create_task(start_http_server())]
         await asyncio.gather(*tasks)
 
