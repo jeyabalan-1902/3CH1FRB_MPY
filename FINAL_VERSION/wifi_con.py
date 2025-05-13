@@ -34,7 +34,9 @@ async def connect_wifi(ssid, password, max_retries=5):
             wifi.connect(ssid, password)
             for _ in range(15):
                 if wifi.isconnected():
-                    print("Connected to Wi-Fi")
+                    rssi = wifi.status('rssi')
+                    print(f"Connected to {ssid}, RSSI:", rssi, "dBm")
+                    print
                     return True
                 await asyncio.sleep(1)
         except Exception as e:

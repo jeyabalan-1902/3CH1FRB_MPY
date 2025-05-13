@@ -11,7 +11,7 @@ import network
 from collections import OrderedDict
 from machine import Timer, Pin
 import uasyncio as asyncio
-from nvs import get_product_id, product_key, clear_wifi_credentials, store_pid
+from nvs import get_product_id, product_key, clear_wifi_credentials, store_pid, nvs
 from gpio import S_Led
 from at24c32n import eeprom, save_device_states
 from wifi_con import wifi
@@ -27,7 +27,12 @@ last_fan_speed = 0
 fan_state = 0
 
 BROKER_ADDRESS = "mqtt.onwords.in"
+PORT = 1883
+USERNAME = "Nikhil"
+MQTT_PASSWORD = "Nikhil8182"
+MQTT_KEEPALIVE = 60
 MQTT_CLIENT_ID = product_id
+
 TOPIC_STATUS = f"onwords/{product_id}/status"
 TOPIC_GET_CURRENT_STATUS = f"onwords/{product_id}/getCurrentStatus"
 TOPIC_SOFTRST = f"onwords/{product_id}/softReset"
@@ -35,10 +40,8 @@ TOPIC_CURRENT_STATUS = f"onwords/{product_id}/currentStatus"
 TOPIC_PID = f"onwords/{product_id}/storePid"
 TOPIC_FIRMWARE = f"onwords/{product_id}/firmware"
 TOPIC_DEVICE_LOG = f"onwords/{product_id}/switch"
-PORT = 1883
-USERNAME = "Nikhil"
-MQTT_PASSWORD = "Nikhil8182"
-MQTT_KEEPALIVE = 60
+TOPIC_CREDENTIALS = f"onwords/{product_id}/credentials"
+
 
 
 # Pin Setup
@@ -194,7 +197,24 @@ def mqtt_callback(topic, msg):
         except Exception as e:
             print("Error in JSON or storing:", e)
             
-    
+    if topic_str == TOPIC_CREDENTIALS:
+        try:
+            data = ujson.loads(msg)
+            ssid = data.get("ssid")
+            password = data.get("password")
+            
+            if "ssid" and "password" in data:
+                nvs.set_blob("wifi_ssid", ssid.encode())
+                nvs.set_blob("wifi_password", password.encode())
+                nvs.commit()
+                print(f"WiFi credentials stored: SSID={ssid}, Password={password}")
+                status_msg = ujson.dumps({"status": "success","ssid": data["ssid"], "password": data["password"]})
+                client.publish(TOPIC_CREDENTIALS, status_msg)
+                time.sleep(2)
+                machine.reset()
+        except Exception as e:
+            print("Error in JSON or storing:", e)
+                  
     if topic_str == f"onwords/{product_id}/firmware":
         try:
             data = ujson.loads(msg)
@@ -257,11 +277,13 @@ def connect_mqtt():
         client.subscribe(TOPIC_SOFTRST)
         client.subscribe(TOPIC_PID)
         client.subscribe(TOPIC_FIRMWARE)
+        client.subscribe(TOPIC_CREDENTIALS)
         print(f"Subscribed to {TOPIC_STATUS}")
         print(f"Subscribed to {TOPIC_GET_CURRENT_STATUS}")
         print(f"Subscribed to {TOPIC_SOFTRST}")
         print(f"Subscribed to {TOPIC_PID}")
         print(f"Subscribed to {TOPIC_FIRMWARE}")
+        print(f"Subscribed to {TOPIC_CREDENTIALS}")
         mqtt_client = 1 
         return client
     except Exception as e:
@@ -340,7 +362,7 @@ async def mqtt_listener():
                 await reconnect_mqtt()
         except Exception as e:
             print("Critical error in mqtt_listener():", e)
-        await asyncio.sleep(1)
+        await asyncio.sleep_ms(10)
         
         
 
