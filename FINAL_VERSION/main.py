@@ -175,15 +175,11 @@ async def main():
         
         if wifi_connected:
             print("Wi-Fi Connected. Starting background tasks.")
-            mqtt.mqtt_client = connect_mqtt()
-
-            if mqtt.mqtt_client:
-                tasks += [
+            connect_mqtt() 
+            tasks += [
                     asyncio.create_task(mqtt_listener()),
                     asyncio.create_task(mqtt_keepalive())
-                ]
-            else:
-                print("MQTT connection failed. Running without MQTT.")
+                ]   
         else:
             print("Wi-Fi failed. trying to reconnect.......")
             
