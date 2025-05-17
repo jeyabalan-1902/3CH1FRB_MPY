@@ -26,7 +26,7 @@ import mqtt
 
 MAX_FAST_RETRIES = 50
 FAST_RETRY_INTERVAL = 10
-SLOW_RETRY_INTERVAL = 300
+SLOW_RETRY_INTERVAL = 60
 
 F1 = Pin(5, Pin.IN, Pin.PULL_DOWN)
 F2 = Pin(18, Pin.IN, Pin.PULL_DOWN)
@@ -175,11 +175,15 @@ async def main():
         
         if wifi_connected:
             print("Wi-Fi Connected. Starting background tasks.")
-            connect_mqtt() 
-            tasks += [
+            mqtt.mqtt_client = connect_mqtt()
+
+            if mqtt.mqtt_client:
+                tasks += [
                     asyncio.create_task(mqtt_listener()),
                     asyncio.create_task(mqtt_keepalive())
-                ]   
+                ]
+            else:
+                print("MQTT connection failed. Running without MQTT.")
         else:
             print("Wi-Fi failed. trying to reconnect.......")
             

@@ -27,7 +27,7 @@ print("AP Mode Active. IP Address:", ap.ifconfig()[0])
 
 
 
-async def connect_wifi(ssid, password, max_retries=5):
+async def connect_wifi(ssid, password, max_retries=20):
     for attempt in range(max_retries):
         try:
             print(f"Attempt {attempt+1} to connect Wi-Fi: {ssid}")
